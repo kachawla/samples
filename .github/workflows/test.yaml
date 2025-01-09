@@ -105,7 +105,7 @@ jobs:
         run: |
           RUN_IDENTIFIER=${{ env.RUN_IDENTIFIER }}-${{ matrix.name }}
 
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ matrix.runOnPullRequest }}" == "false" ]]; then
+          if [[ ${{ matrix.credential }}" == "aws" || ( "${{ github.event_name }}" == "pull_request" && "${{ matrix.runOnPullRequest }}" == "false") ]]; then
             RUN_TEST=false
           else
             RUN_TEST=true
