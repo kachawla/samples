@@ -111,18 +111,11 @@ jobs:
             RUN_TEST=true
           fi
 
-          if [[ "${{ matrix.enableDapr }}" == "true" ]]; then
-            ENABLE_DAPR=true
-          else
-            ENABLE_DAPR=false
-          fi
-
           # Set output variables to be used in the other jobs
           echo "RUN_IDENTIFIER=${RUN_IDENTIFIER}" >> $GITHUB_OUTPUT
           echo "TEST_AZURE_RESOURCE_GROUP=rg-${RUN_IDENTIFIER}" >> $GITHUB_OUTPUT
           echo "TEST_EKS_CLUSTER_NAME=eks-${RUN_IDENTIFIER}" >> $GITHUB_OUTPUT
           echo "RUN_TEST=${RUN_TEST}" >> $GITHUB_OUTPUT
-          echo "ENABLE_DAPR=${ENABLE_DAPR}" >> $GITHUB_OUTPUT
       - name: Generate Radius version variables
         id: gen-radius-version
         if: steps.gen-id.outputs.RUN_TEST == 'true'
@@ -248,11 +241,26 @@ jobs:
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ steps.gen-id.outputs.TEST_EKS_CLUSTER_NAME }}
         timeout-minutes: 60
         continue-on-error: false
-      - name: Install Dapr
-        if: steps.gen-id.outputs.RUN_TEST == 'true' && steps.gen-id.outputs.ENABLE_DAPR == 'true'
+      - name: Set up EKS for Dapr
+        if: steps.gen-id.outputs.RUN_TEST == 'true' && matrix.credential == 'aws'
         run: |
-          helm repo add dapr https://dapr.github.io/helm-charts/
-          helm install dapr dapr/dapr --version=1.6 --namespace dapr-system --create-namespace --wait
+          # Grab the security group ID for the EKS worker nodes
+          export NODE_SECURITY_GROUP_ID=$(eksctl get nodegroup \
+            --cluster ${{ steps.gen-id.outputs.TEST_EKS_CLUSTER_NAME }} \
+            --name <your-nodegroup-name> \
+            --region ${{ env.AWS_REGION }} \
+            -o json | jq -r '.[0].Resources.SecurityGroup.ID')
+
+          # Authorize port 4000 for Dapr sidecar communication
+          # https://docs.dapr.io/operations/hosting/kubernetes/cluster/setup-eks/#add-dapr-requirements-for-sidecar-access-and-default-storage-class
+          aws ec2 authorize-security-group-ingress \
+            --group-id $NODE_SECURITY_GROUP_ID \
+            --protocol tcp \
+            --port 4000 \
+            --cidr 0.0.0.0/0
+
+          # Add a default storage class
+          kubectl patch storageclass gp2 -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
       - uses: oras-project/setup-oras@main
         if: steps.gen-id.outputs.RUN_TEST == 'true'
         with:
