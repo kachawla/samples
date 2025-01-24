@@ -251,26 +251,20 @@ jobs:
       - name: Configure EKS for Dapr
         if: steps.gen-id.outputs.RUN_TEST == 'true' && matrix.credential == 'aws'
         run: |
-          # Fetch the node group name dynamically
-          NODEGROUP_NAME=$(eksctl get nodegroup \
-            --cluster ${{ steps.gen-id.outputs.TEST_EKS_CLUSTER_NAME }} \
+          # Fetch the security group ID for the EKS cluster
+          SECURITY_GROUP_ID=$(aws eks describe-cluster \
+            --name ${{ steps.gen-id.outputs.TEST_EKS_CLUSTER_NAME }} \
+            --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' \
             --region ${{ env.AWS_REGION }} \
-            -o json | jq -r '.[0].Name')
-
-          # Fetch the security group ID for the EKS worker nodes
-          NODE_SECURITY_GROUP_ID=$(eksctl get nodegroup \
-            --cluster ${{ steps.gen-id.outputs.TEST_EKS_CLUSTER_NAME }} \
-            --name $NODEGROUP_NAME \
-            --region ${{ env.AWS_REGION }} \
-            -o json | jq -r '.[0].Resources.SecurityGroup.ID')
+            --output text)
 
           # Authorize port 4000 for Dapr sidecar communication within the same security group
           # https://docs.dapr.io/operations/hosting/kubernetes/cluster/setup-eks/#add-dapr-requirements-for-sidecar-access-and-default-storage-class
           aws ec2 authorize-security-group-ingress \
-            --group-id $NODE_SECURITY_GROUP_ID \
+            --group-id $SECURITY_GROUP_ID \
             --protocol tcp \
             --port 4000 \
-            --source-group $NODE_SECURITY_GROUP_ID
+            --source-group $SECURITY_GROUP_ID
 
           # Add a default storage class
           kubectl patch storageclass gp2 -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
